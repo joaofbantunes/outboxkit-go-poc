@@ -1,0 +1,1 @@
+CREATE DATABASE outboxkit_go_pg_sample;
