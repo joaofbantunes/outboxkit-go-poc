@@ -3,7 +3,7 @@ package polling
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/joaofbantunes/outboxkit-go-poc/core"
 )
@@ -37,13 +37,15 @@ type DefaultProducer struct {
 	key      core.Key
 	fetcher  BatchFetcher
 	producer BatchProducer
+	logger   *slog.Logger
 }
 
-func NewProducer(key core.Key, fetcher BatchFetcher, producer BatchProducer) *DefaultProducer {
+func NewProducer(key core.Key, fetcher BatchFetcher, producer BatchProducer, logProvider func(name string) *slog.Logger) *DefaultProducer {
 	return &DefaultProducer{
 		key:      key,
 		fetcher:  fetcher,
 		producer: producer,
+		logger:   logProvider("producer"),
 	}
 }
 
@@ -76,7 +78,7 @@ func (p *DefaultProducer) ProducePending(ctx context.Context) ProducePendingResu
 func (p *DefaultProducer) produceBatch(ctx context.Context) produceBatchResult {
 	batchCtx, err := p.fetcher.FetchAndHold(ctx)
 	if err != nil {
-		log.Printf("error fetching batch: %v", err)
+		p.logger.ErrorContext(ctx, "Error fetching batch", slog.Any("key", p.key), slog.Any("error", err))
 		return fetchError
 	}
 
@@ -89,31 +91,31 @@ func (p *DefaultProducer) produceBatch(ctx context.Context) produceBatchResult {
 
 	result, err := p.producer.Produce(ctx, p.key, messages)
 	if err != nil {
-		log.Printf("error producing messages: %v", err)
+		p.logger.ErrorContext(ctx, "Error producing messages", slog.Any("key", p.key), slog.Any("error", err))
 		return produceError
 	}
 
 	err = batchCtx.Complete(ctx, result.Ok)
 	if err != nil {
 		// TODO: collect Ok messages for retry
-		log.Printf("error completing batch: %v", err)
+		p.logger.ErrorContext(ctx, "Error completing batch", slog.Any("key", p.key), slog.Any("error", err))
 		return completeError
 	}
 
 	if len(result.Ok) < len(messages) {
-		log.Printf("partial production: %d out of %d messages produced", len(result.Ok), len(messages))
+		p.logger.DebugContext(ctx, "Partial production occurred", slog.Any("key", p.key), slog.Int("produced", len(result.Ok)), slog.Int("total", len(messages)))
 		return partialProduction
 	}
 
 	hasNext, err := batchCtx.HasNext(ctx)
 	if err != nil {
-		log.Printf("error checking for next batch: %v", err)
+		p.logger.ErrorContext(ctx, "Error checking for next batch", slog.Any("key", p.key), slog.Any("error", err))
 		return fetchError
 	}
 	if hasNext {
-		log.Printf("more messages available for key: %s", p.key)
+		p.logger.DebugContext(ctx, "More messages available", slog.Any("key", p.key))
 		return moreAvailable
 	}
-	log.Printf("all messages processed for key: %s", p.key)
+	p.logger.DebugContext(ctx, "All messages processed", slog.Any("key", p.key))
 	return allDone
 }

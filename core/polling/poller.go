@@ -2,35 +2,37 @@ package polling
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/joaofbantunes/outboxkit-go-poc/core"
 )
 
 type Poller struct {
-	key core.Key
-	tp  core.TimeProvider
-	p   Producer
-	l   *listener
+	key      core.Key
+	tp       core.TimeProvider
+	p        Producer
+	listener *listener
+	logger   *slog.Logger
 }
 
-func NewPoller(key core.Key, tp core.TimeProvider, p Producer) *Poller {
+func NewPoller(key core.Key, tp core.TimeProvider, p Producer, logProvider func(name string) *slog.Logger) *Poller {
 	return &Poller{
-		key: key,
-		tp:  tp,
-		p:   p,
-		l:   newOutboxListener(),
+		key:      key,
+		tp:       tp,
+		p:        p,
+		listener: newOutboxListener(),
+		logger:   logProvider("poller"),
 	}
 }
 
 func (p *Poller) Trigger() OutboxTrigger {
-	return p.l
+	return p.listener
 }
 
 func (p *Poller) Start(ctx context.Context) {
 
-	log.Printf("Starting poller with key: %s", p.key)
+	p.logger.DebugContext(ctx, "Starting poller", slog.Any("key", p.key))
 	go p.loop(ctx)
 }
 
@@ -39,15 +41,17 @@ func (p *Poller) loop(ctx context.Context) {
 	ticker := p.tp.NewTicker(duration)
 	defer ticker.Stop()
 
+	// TODO: rethink the way ticker is being used, as with all the cases that are being handled,
+	// it's being used incorrectly here (and possibly we need a timer instead)
 	for {
 		select {
-		case <-p.l.Chan():
+		case <-p.listener.Chan():
 			p.executeCycle(ctx)
 		case <-ticker.Chan():
 			p.executeCycle(ctx)
 		case <-ctx.Done():
-			log.Printf("Ctx signaled, stopping poller with key: %s", p.key)
-			return // Exit on context cancellation
+			p.logger.DebugContext(ctx, "Stopping poller", slog.Any("key", p.key))
+			return
 		}
 	}
 }
@@ -57,18 +61,22 @@ func (p *Poller) executeCycle(ctx context.Context) {
 	switch result {
 	case Ok:
 		// TODO: Successfully produced pending items
-		log.Printf("Successfully produced pending items for key: %v", p.key)
+		p.logger.DebugContext(ctx, "Successfully produced pending items", slog.Any("key", p.key))
 	case FetchError:
 		// TODO: Handle fetch error
+		p.logger.DebugContext(ctx, "Fetch error occurred", slog.Any("key", p.key))
 		panic(result)
 	case ProduceError:
 		// TODO: Handle produce error
+		p.logger.DebugContext(ctx, "Produce error occurred", slog.Any("key", p.key))
 		panic(result)
 	case PartialProduction:
 		// TODO: Handle partial production
+		p.logger.DebugContext(ctx, "Partial production occurred", slog.Any("key", p.key))
 		panic(result)
 	case CompleteError:
 		// TODO: Handle complete error
+		p.logger.DebugContext(ctx, "Complete error occurred", slog.Any("key", p.key))
 		panic(result)
 	}
 }

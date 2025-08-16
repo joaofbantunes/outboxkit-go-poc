@@ -3,7 +3,7 @@ package polling
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -12,12 +12,16 @@ import (
 )
 
 type pgBatchFetcher struct {
-	pool *pgxpool.Pool
+	pool           *pgxpool.Pool
+	logger         *slog.Logger
+	batchCtxLogger *slog.Logger
 }
 
-func NewPgBatchFetcher(pool *pgxpool.Pool) polling.BatchFetcher {
+func NewPgBatchFetcher(pool *pgxpool.Pool, logProvider func(name string) *slog.Logger) polling.BatchFetcher {
 	return &pgBatchFetcher{
-		pool: pool,
+		pool:           pool,
+		logger:         logProvider("pgBatchFetcher"),
+		batchCtxLogger: logProvider("pgBatchContext"),
 	}
 }
 
@@ -73,6 +77,7 @@ type pgBatchContext struct {
 	messages []core.Message
 	pool     *pgxpool.Pool
 	tx       pgx.Tx
+	logger   *slog.Logger
 }
 
 func (c *pgBatchContext) Messages() []core.Message {
@@ -120,6 +125,6 @@ func (c *pgBatchContext) HasNext(ctx context.Context) (bool, error) {
 func (c *pgBatchContext) Close(ctx context.Context) {
 	err := c.tx.Rollback(ctx)
 	if err != nil && !errors.Is(err, pgx.ErrTxClosed) {
-		log.Printf("Error rolling back transaction: %v", err)
+		c.logger.ErrorContext(ctx, "Error rolling back transaction", slog.Any("error", err))
 	}
 }

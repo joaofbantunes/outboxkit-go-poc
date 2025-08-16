@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -30,6 +30,8 @@ var connStr = "postgres://user:pass@localhost:5432/outboxkit_go_pg_sample?sslmod
 var pool *pgxpool.Pool
 var trigger corePolling.OutboxTrigger
 
+var logger = logProvider("main")
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -47,10 +49,11 @@ func main() {
 		Handler: mux,
 	}
 
-	log.Printf("Server starting on %s", srv.Addr)
+	logger.Info("Server starting", slog.String("addr", srv.Addr))
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("Error with server: %v", err)
+			logger.Error("Server error", slog.String("addr", srv.Addr), slog.Any("error", err))
+			os.Exit(1)
 		}
 	}()
 
@@ -63,7 +66,7 @@ func main() {
 		shutdownCtx, cancel := context.WithTimeout(shutdownCtx, 10*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
-			log.Printf("Error with server shutdown: %v", err)
+			logger.Error("Error with server shutdown", slog.Any("error", err))
 		}
 	}()
 	wg.Wait()
@@ -102,7 +105,7 @@ func produceHandler(w http.ResponseWriter, r *http.Request) {
 	defer func(batchResults pgx.BatchResults) {
 		err := batchResults.Close()
 		if err != nil {
-			log.Printf("Failed to close batch results: %v", err)
+			logger.ErrorContext(r.Context(), "Failed to close batch results", slog.Any("error", err))
 		}
 	}(batchResults)
 
@@ -110,7 +113,7 @@ func produceHandler(w http.ResponseWriter, r *http.Request) {
 	for i := 0; i < count; i++ {
 		_, err := batchResults.Exec()
 		if err != nil {
-			log.Printf("Failed to insert message %d: %v", i, err)
+			logger.ErrorContext(r.Context(), "Failed to insert message", slog.Int("index", i), slog.Any("error", err))
 			hasError = true
 		}
 	}
@@ -121,7 +124,7 @@ func produceHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	log.Printf("Inserted %d messages", count)
+	logger.InfoContext(r.Context(), "Successfully inserted", slog.Int("count", count))
 	trigger.OnNewMessages()
 }
 
@@ -129,7 +132,8 @@ func migrateDB() {
 	db, err := sql.Open("postgres", connStr)
 
 	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
+		logger.Error("Failed to connect to database", slog.Any("error", err))
+		os.Exit(1)
 	}
 
 	defer func(db *sql.DB) {
@@ -138,7 +142,8 @@ func migrateDB() {
 
 	driver, err := postgres.WithInstance(db, &postgres.Config{})
 	if err != nil {
-		log.Fatalf("postgres.WithInstance: %v", err)
+		logger.Error("postgres.WithInstance", slog.Any("error", err))
+		os.Exit(1)
 	}
 
 	m, err := migrate.NewWithDatabaseInstance(
@@ -147,23 +152,27 @@ func migrateDB() {
 		driver)
 
 	if err != nil {
-		log.Fatalf("migrate.NewWithDatabaseInstance: %v", err)
+		logger.Error("migrate.NewWithDatabaseInstance", slog.Any("error", err))
+		os.Exit(1)
 	}
 
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		log.Fatalf("m.Up: %v", err)
+		logger.Error("migrate.Up", slog.Any("error", err))
+		os.Exit(1)
 	}
 }
 
 func createPool() *pgxpool.Pool {
 	poolConfig, err := pgxpool.ParseConfig(connStr)
 	if err != nil {
-		log.Fatalf("Failed to parse pool config: %v", err)
+		logger.Error("Failed to parse connection string", slog.Any("error", err))
+		os.Exit(1)
 	}
 
 	pool, err = pgxpool.NewWithConfig(context.Background(), poolConfig)
 	if err != nil {
-		log.Fatalf("Failed to create connection pool: %v", err)
+		logger.Error("Failed to create connection pool", slog.Any("error", err))
+		os.Exit(1)
 	}
 
 	return pool
@@ -176,10 +185,17 @@ func initOutbox(ctx context.Context) {
 		core.NewSystemTimeProvider(),
 		corePolling.NewProducer(
 			key,
-			pgPolling.NewPgBatchFetcher(pool),
-			NewFakeBatchProducer(),
+			pgPolling.NewPgBatchFetcher(pool, logProvider),
+			NewFakeBatchProducer(logProvider),
+			logProvider,
 		),
+		logProvider,
 	)
 	trigger = poller.Trigger()
 	poller.Start(ctx)
+}
+
+func logProvider(name string) *slog.Logger {
+	// otelslog handler will receive a name, the built-in doesn't so adding the name as an attribute
+	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})).With(slog.Any("source", name))
 }
