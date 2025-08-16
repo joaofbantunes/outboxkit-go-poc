@@ -12,6 +12,7 @@ type Poller struct {
 	key core.Key
 	tp  core.TimeProvider
 	p   Producer
+	l   *listener
 }
 
 func NewPoller(key core.Key, tp core.TimeProvider, p Producer) *Poller {
@@ -19,7 +20,12 @@ func NewPoller(key core.Key, tp core.TimeProvider, p Producer) *Poller {
 		key: key,
 		tp:  tp,
 		p:   p,
+		l:   newOutboxListener(),
 	}
+}
+
+func (p *Poller) Trigger() OutboxTrigger {
+	return p.l
 }
 
 func (p *Poller) Start(ctx context.Context) {
@@ -35,7 +41,8 @@ func (p *Poller) loop(ctx context.Context) {
 
 	for {
 		select {
-		// TODO: handle trigger optimization
+		case <-p.l.Chan():
+			p.executeCycle(ctx)
 		case <-ticker.Chan():
 			p.executeCycle(ctx)
 		case <-ctx.Done():

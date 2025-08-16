@@ -19,7 +19,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joaofbantunes/outboxkit-go-poc/core"
-	"github.com/joaofbantunes/outboxkit-go-poc/core/polling"
+	corePolling "github.com/joaofbantunes/outboxkit-go-poc/core/polling"
+	pgPolling "github.com/joaofbantunes/outboxkit-go-poc/pg/polling"
 )
 
 // TODO: move
@@ -27,6 +28,7 @@ var connStr = "postgres://user:pass@localhost:5432/outboxkit_go_pg_sample?sslmod
 
 // TODO: move
 var pool *pgxpool.Pool
+var trigger corePolling.OutboxTrigger
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -119,7 +121,8 @@ func produceHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	log.Printf("Produced %d messages", count)
+	log.Printf("Inserted %d messages", count)
+	trigger.OnNewMessages()
 }
 
 func migrateDB() {
@@ -167,11 +170,16 @@ func createPool() *pgxpool.Pool {
 }
 
 func initOutbox(ctx context.Context) {
-	poller := polling.NewPoller(
-		core.NewDefaultKey("pg_polling"),
+	key := core.NewDefaultKey("pg_polling")
+	poller := corePolling.NewPoller(
+		key,
 		core.NewSystemTimeProvider(),
-		polling.NewToNameProducer(),
+		corePolling.NewProducer(
+			key,
+			pgPolling.NewPgBatchFetcher(pool),
+			NewFakeBatchProducer(),
+		),
 	)
-
+	trigger = poller.Trigger()
 	poller.Start(ctx)
 }
