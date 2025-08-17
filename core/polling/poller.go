@@ -9,20 +9,20 @@ import (
 )
 
 type Poller struct {
-	key      core.Key
+	key      *core.Key
 	tp       core.TimeProvider
 	p        Producer
 	listener *listener
 	logger   *slog.Logger
 }
 
-func NewPoller(key core.Key, tp core.TimeProvider, p Producer, logProvider func(name string) *slog.Logger) *Poller {
+func NewPoller(key *core.Key, tp core.TimeProvider, p Producer, logProvider func(name string) *slog.Logger) *Poller {
 	return &Poller{
 		key:      key,
 		tp:       tp,
 		p:        p,
 		listener: newOutboxListener(),
-		logger:   logProvider("poller"),
+		logger:   logProvider("poller").With(slog.String("key", key.String())),
 	}
 }
 
@@ -32,7 +32,7 @@ func (p *Poller) Trigger() OutboxTrigger {
 
 func (p *Poller) Start(ctx context.Context) {
 
-	p.logger.DebugContext(ctx, "Starting poller", slog.Any("key", p.key))
+	p.logger.DebugContext(ctx, "Starting poller")
 	go p.loop(ctx)
 }
 
@@ -50,7 +50,7 @@ func (p *Poller) loop(ctx context.Context) {
 		case <-ticker.Chan():
 			p.executeCycle(ctx)
 		case <-ctx.Done():
-			p.logger.DebugContext(ctx, "Stopping poller", slog.Any("key", p.key))
+			p.logger.DebugContext(ctx, "Stopping poller")
 			return
 		}
 	}
@@ -61,22 +61,22 @@ func (p *Poller) executeCycle(ctx context.Context) {
 	switch result {
 	case Ok:
 		// TODO: Successfully produced pending items
-		p.logger.DebugContext(ctx, "Successfully produced pending items", slog.Any("key", p.key))
+		p.logger.DebugContext(ctx, "Successfully produced pending items")
 	case FetchError:
 		// TODO: Handle fetch error
-		p.logger.DebugContext(ctx, "Fetch error occurred", slog.Any("key", p.key))
+		p.logger.DebugContext(ctx, "Fetch error occurred")
 		panic(result)
 	case ProduceError:
 		// TODO: Handle produce error
-		p.logger.DebugContext(ctx, "Produce error occurred", slog.Any("key", p.key))
+		p.logger.DebugContext(ctx, "Produce error occurred")
 		panic(result)
 	case PartialProduction:
 		// TODO: Handle partial production
-		p.logger.DebugContext(ctx, "Partial production occurred", slog.Any("key", p.key))
+		p.logger.DebugContext(ctx, "Partial production occurred")
 		panic(result)
 	case CompleteError:
 		// TODO: Handle complete error
-		p.logger.DebugContext(ctx, "Complete error occurred", slog.Any("key", p.key))
+		p.logger.DebugContext(ctx, "Complete error occurred")
 		panic(result)
 	}
 }

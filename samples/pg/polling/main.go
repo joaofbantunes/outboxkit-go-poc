@@ -179,13 +179,13 @@ func createPool() *pgxpool.Pool {
 }
 
 func initOutbox(ctx context.Context) {
-	key := core.NewDefaultKey("pg_polling")
+	key := pgPolling.NewDefaultKey()
 	poller := corePolling.NewPoller(
 		key,
 		core.NewSystemTimeProvider(),
 		corePolling.NewProducer(
 			key,
-			pgPolling.NewPgBatchFetcher(pool, logProvider),
+			pgPolling.NewPgBatchFetcher(key, pool, logProvider),
 			NewFakeBatchProducer(logProvider),
 			logProvider,
 		),
@@ -197,5 +197,5 @@ func initOutbox(ctx context.Context) {
 
 func logProvider(name string) *slog.Logger {
 	// otelslog handler will receive a name, the built-in doesn't so adding the name as an attribute
-	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})).With(slog.Any("source", name))
+	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})).With(slog.String("source", name))
 }

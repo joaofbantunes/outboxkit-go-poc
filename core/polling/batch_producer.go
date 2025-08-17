@@ -11,5 +11,5 @@ type BatchProduceResult struct {
 }
 
 type BatchProducer interface {
-	Produce(ctx context.Context, key core.Key, messages []core.Message) (BatchProduceResult, error)
+	Produce(ctx context.Context, key *core.Key, messages []core.Message) (BatchProduceResult, error)
 }

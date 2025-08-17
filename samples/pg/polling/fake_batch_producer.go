@@ -18,9 +18,9 @@ func NewFakeBatchProducer(logProvider func(name string) *slog.Logger) polling.Ba
 	}
 }
 
-func (p *fakeBatchProducer) Produce(ctx context.Context, key core.Key, messages []core.Message) (polling.BatchProduceResult, error) {
+func (p *fakeBatchProducer) Produce(ctx context.Context, key *core.Key, messages []core.Message) (polling.BatchProduceResult, error) {
 	for _, msg := range messages {
-		p.logger.DebugContext(ctx, "Producing message", slog.Any("message", msg), slog.Any("key", key))
+		p.logger.DebugContext(ctx, "Producing message", slog.Any("message", msg), slog.String("key", key.String()))
 	}
 
 	return polling.BatchProduceResult{Ok: messages}, nil

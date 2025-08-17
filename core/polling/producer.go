@@ -34,18 +34,18 @@ type Producer interface {
 }
 
 type DefaultProducer struct {
-	key      core.Key
+	key      *core.Key
 	fetcher  BatchFetcher
 	producer BatchProducer
 	logger   *slog.Logger
 }
 
-func NewProducer(key core.Key, fetcher BatchFetcher, producer BatchProducer, logProvider func(name string) *slog.Logger) *DefaultProducer {
+func NewProducer(key *core.Key, fetcher BatchFetcher, producer BatchProducer, logProvider func(name string) *slog.Logger) *DefaultProducer {
 	return &DefaultProducer{
 		key:      key,
 		fetcher:  fetcher,
 		producer: producer,
-		logger:   logProvider("producer"),
+		logger:   logProvider("producer").With(slog.String("key", key.String())),
 	}
 }
 
@@ -78,7 +78,7 @@ func (p *DefaultProducer) ProducePending(ctx context.Context) ProducePendingResu
 func (p *DefaultProducer) produceBatch(ctx context.Context) produceBatchResult {
 	batchCtx, err := p.fetcher.FetchAndHold(ctx)
 	if err != nil {
-		p.logger.ErrorContext(ctx, "Error fetching batch", slog.Any("key", p.key), slog.Any("error", err))
+		p.logger.ErrorContext(ctx, "Error fetching batch", slog.Any("error", err))
 		return fetchError
 	}
 
@@ -91,31 +91,31 @@ func (p *DefaultProducer) produceBatch(ctx context.Context) produceBatchResult {
 
 	result, err := p.producer.Produce(ctx, p.key, messages)
 	if err != nil {
-		p.logger.ErrorContext(ctx, "Error producing messages", slog.Any("key", p.key), slog.Any("error", err))
+		p.logger.ErrorContext(ctx, "Error producing messages", slog.Any("error", err))
 		return produceError
 	}
 
 	err = batchCtx.Complete(ctx, result.Ok)
 	if err != nil {
 		// TODO: collect Ok messages for retry
-		p.logger.ErrorContext(ctx, "Error completing batch", slog.Any("key", p.key), slog.Any("error", err))
+		p.logger.ErrorContext(ctx, "Error completing batch", slog.Any("error", err))
 		return completeError
 	}
 
 	if len(result.Ok) < len(messages) {
-		p.logger.DebugContext(ctx, "Partial production occurred", slog.Any("key", p.key), slog.Int("produced", len(result.Ok)), slog.Int("total", len(messages)))
+		p.logger.DebugContext(ctx, "Partial production occurred", slog.Int("produced", len(result.Ok)), slog.Int("total", len(messages)))
 		return partialProduction
 	}
 
 	hasNext, err := batchCtx.HasNext(ctx)
 	if err != nil {
-		p.logger.ErrorContext(ctx, "Error checking for next batch", slog.Any("key", p.key), slog.Any("error", err))
+		p.logger.ErrorContext(ctx, "Error checking for next batch", slog.Any("error", err))
 		return fetchError
 	}
 	if hasNext {
-		p.logger.DebugContext(ctx, "More messages available", slog.Any("key", p.key))
+		p.logger.DebugContext(ctx, "More messages available")
 		return moreAvailable
 	}
-	p.logger.DebugContext(ctx, "All messages processed", slog.Any("key", p.key))
+	p.logger.DebugContext(ctx, "All messages processed")
 	return allDone
 }

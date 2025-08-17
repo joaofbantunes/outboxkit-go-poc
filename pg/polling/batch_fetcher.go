@@ -17,11 +17,11 @@ type pgBatchFetcher struct {
 	batchCtxLogger *slog.Logger
 }
 
-func NewPgBatchFetcher(pool *pgxpool.Pool, logProvider func(name string) *slog.Logger) polling.BatchFetcher {
+func NewPgBatchFetcher(key *core.Key, pool *pgxpool.Pool, logProvider func(name string) *slog.Logger) polling.BatchFetcher {
 	return &pgBatchFetcher{
 		pool:           pool,
-		logger:         logProvider("pgBatchFetcher"),
-		batchCtxLogger: logProvider("pgBatchContext"),
+		logger:         logProvider("pgBatchFetcher").With(slog.String("key", key.String())),
+		batchCtxLogger: logProvider("pgBatchContext").With(slog.String("key", key.String())),
 	}
 }
 
